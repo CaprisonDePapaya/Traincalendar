@@ -24,9 +24,20 @@ class BoardRepository(context: Context) {
     private val app = context.applicationContext
     private val prefs = app.getSharedPreferences("day_board", Context.MODE_PRIVATE)
 
+    /** The demo day from the video. Off unless switched on in Settings. */
     var sampleMode: Boolean
-        get() = prefs.getBoolean(KEY_SAMPLE, true)
+        get() = prefs.getBoolean(KEY_SAMPLE, false)
         set(value) = prefs.edit().putBoolean(KEY_SAMPLE, value).apply()
+
+    /** Phone calendars the user has switched off on the board. */
+    var hiddenCalendars: Set<Long>
+        get() = prefs.getStringSet(KEY_HIDDEN_CALENDARS, null).orEmpty().mapNotNull { it.toLongOrNull() }.toSet()
+        set(value) = prefs.edit().putStringSet(KEY_HIDDEN_CALENDARS, value.map { it.toString() }.toSet()).apply()
+
+    /** Single phone-calendar events removed from the board (they stay in the calendar). */
+    var hiddenEvents: Set<String>
+        get() = prefs.getStringSet(KEY_HIDDEN_EVENTS, null).orEmpty().toSet()
+        set(value) = prefs.edit().putStringSet(KEY_HIDDEN_EVENTS, value).apply()
 
     fun hasCalendarPermission(): Boolean =
         ContextCompat.checkSelfPermission(app, Manifest.permission.READ_CALENDAR) ==
@@ -108,25 +119,11 @@ class BoardRepository(context: Context) {
         prefs.edit().putString(KEY_LOCAL, arr.toString()).apply()
     }
 
-    fun addLocalEvent(
-        title: String,
-        location: String?,
-        start: Long,
-        end: Long,
-        allDay: Boolean,
-        lineId: String,
-    ) {
-        val event = BoardEvent(
-            id = "local-" + UUID.randomUUID(),
-            title = title,
-            location = location,
-            start = start,
-            end = end,
-            allDay = allDay,
-            lineId = lineId,
-            source = EventSource.LOCAL,
-        )
-        saveLocalEvents(localEvents() + event)
+    fun newLocalId(): String = "local-" + UUID.randomUUID()
+
+    /** Adds the event, or replaces the stored one with the same id. */
+    fun saveLocalEvent(event: BoardEvent) {
+        saveLocalEvents(localEvents().filterNot { it.id == event.id } + event.copy(source = EventSource.LOCAL))
     }
 
     fun deleteLocalEvent(id: String) = saveLocalEvents(localEvents().filterNot { it.id == id })
@@ -141,6 +138,7 @@ class BoardRepository(context: Context) {
             CalendarContract.Calendars.ACCOUNT_NAME,
             CalendarContract.Calendars.CALENDAR_COLOR,
         )
+        val hidden = hiddenCalendars
         val result = mutableListOf<CalendarInfo>()
         runCatching {
             app.contentResolver.query(
@@ -153,6 +151,7 @@ class BoardRepository(context: Context) {
                         name = c.getString(1) ?: "Calendar",
                         account = c.getString(2) ?: "",
                         color = c.getInt(3),
+                        shown = c.getLong(0) !in hidden,
                     )
                 }
             }
@@ -182,6 +181,8 @@ class BoardRepository(context: Context) {
             CalendarContract.Instances.CALENDAR_ID,
             CalendarContract.Instances.CALENDAR_DISPLAY_NAME,
         )
+        val hiddenCals = hiddenCalendars
+        val hiddenIds = hiddenEvents
         val result = mutableListOf<BoardEvent>()
         runCatching {
             app.contentResolver.query(
@@ -201,16 +202,20 @@ class BoardRepository(context: Context) {
                     }
                     if (!onDay) continue
                     val eventId = c.getLong(0)
+                    val calendarId = c.getLong(6)
+                    val id = "cal-$eventId-$begin"
+                    if (calendarId in hiddenCals || id in hiddenIds) continue
                     result += BoardEvent(
-                        id = "cal-$eventId-$begin",
+                        id = id,
                         title = c.getString(1)?.ifBlank { null } ?: "(No title)",
                         location = c.getString(2)?.ifBlank { null },
                         start = begin,
                         end = end,
                         allDay = allDay,
-                        lineId = lineForCalendar(c.getLong(6), c.getString(7), lines),
+                        lineId = lineForCalendar(calendarId, c.getString(7), lines),
                         source = EventSource.CALENDAR,
                         calendarEventId = eventId,
+                        calendarId = calendarId,
                     )
                 }
             }
@@ -277,7 +282,10 @@ class BoardRepository(context: Context) {
     }
 
     companion object {
-        private const val KEY_SAMPLE = "sample_mode"
+        // A new key: the first release kept the sample day on by default.
+        private const val KEY_SAMPLE = "sample_day_on"
+        private const val KEY_HIDDEN_CALENDARS = "hidden_calendars"
+        private const val KEY_HIDDEN_EVENTS = "hidden_events"
         private const val KEY_LINES = "lines"
         private const val KEY_LOCAL = "local_events"
         private const val DAY_MS = 24 * 60 * 60 * 1000L

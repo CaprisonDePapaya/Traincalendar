@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -46,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,7 +55,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.traincalendar.dayboard.data.BoardEvent
 import com.traincalendar.dayboard.data.Countdown
-import com.traincalendar.dayboard.data.EventSource
 import com.traincalendar.dayboard.data.countdown
 import java.time.Instant
 import java.time.LocalDate
@@ -69,12 +70,18 @@ fun formatClock(millis: Long): String =
     Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(clockFormat)
 
 @Composable
-fun BoardScreen(state: BoardUiState, viewModel: BoardViewModel) {
+fun BoardScreen(
+    state: BoardUiState,
+    viewModel: BoardViewModel,
+    onAdd: () -> Unit,
+    onEdit: (BoardEvent) -> Unit,
+    showUndo: (message: String, undo: () -> Unit) -> Unit,
+) {
     val context = LocalContext.current
     var lineFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var showAllDay by rememberSaveable { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
-    var pendingDelete by remember { mutableStateOf<BoardEvent?>(null) }
+    var openEventId by rememberSaveable { mutableStateOf<String?>(null) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -127,7 +134,8 @@ fun BoardScreen(state: BoardUiState, viewModel: BoardViewModel) {
                     Modifier
                         .size(36.dp)
                         .background(Board.PanelLine, CircleShape)
-                        .clickable { showSettings = true },
+                        .clickable { showSettings = true }
+                        .testTag("settings"),
                     contentAlignment = Alignment.Center,
                 ) { Text("⚙", color = Color.White, fontSize = 18.sp) }
             }
@@ -177,10 +185,23 @@ fun BoardScreen(state: BoardUiState, viewModel: BoardViewModel) {
         ) {
             if (showAllDay && allDay.isNotEmpty()) {
                 item {
-                    Column(Modifier.fillMaxWidth().background(Board.Panel).padding(16.dp)) {
-                        Text("◆ ALL-DAY PLANS", color = Board.Yellow, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Column(Modifier.fillMaxWidth().background(Board.Panel).padding(vertical = 10.dp)) {
+                        Text(
+                            "◆ ALL-DAY PLANS",
+                            color = Board.Yellow,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                        )
                         allDay.forEach { ev ->
-                            Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable { openEventId = ev.id }
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
                                 LineBadge(state.line(ev.lineId), 22.dp)
                                 Spacer(Modifier.width(10.dp))
                                 Text(ev.title, color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -189,17 +210,19 @@ fun BoardScreen(state: BoardUiState, viewModel: BoardViewModel) {
                     }
                 }
             }
-            if (state.loaded && !state.sampleMode && !state.hasCalendarPermission) {
-                item { ConnectCalendarCard(requestCalendar, onSample = { viewModel.setSampleMode(true) }) }
-            }
-            if (state.loaded && timed.isEmpty() && (state.sampleMode || state.hasCalendarPermission)) {
+            if (state.loaded && timed.isEmpty()) {
                 item {
-                    Text(
-                        if (state.isToday) "No more departures today." else "No departures scheduled.",
-                        color = Board.Muted,
-                        fontSize = 15.sp,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                    EmptyBoard(
+                        title = when {
+                            lineFilter != null -> "Nothing on this line."
+                            state.isToday && state.events.any { !it.allDay } -> "No more departures today."
+                            else -> "Your board is empty."
+                        },
+                        showCalendarLink = !state.hasCalendarPermission,
+                        showSampleLink = !state.sampleMode,
+                        onAdd = onAdd,
+                        onConnect = requestCalendar,
+                        onSample = { viewModel.setSampleMode(true) },
                     )
                 }
             }
@@ -209,41 +232,55 @@ fun BoardScreen(state: BoardUiState, viewModel: BoardViewModel) {
                     event = ev,
                     state = state,
                     highlighted = ev.id == firstLive,
-                    onClick = {
-                        when (ev.source) {
-                            EventSource.CALENDAR -> ev.calendarEventId?.let { id ->
-                                runCatching {
-                                    context.startActivity(
-                                        Intent(Intent.ACTION_VIEW, ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id))
-                                    )
-                                }
-                            }
-                            EventSource.LOCAL -> pendingDelete = ev
-                            EventSource.SAMPLE -> Unit
-                        }
-                    },
+                    onClick = { openEventId = ev.id },
                 )
             }
         }
     }
 
+    state.events.firstOrNull { it.id == openEventId }?.let { ev ->
+        val calendar = state.calendars.firstOrNull { it.id == ev.calendarId }
+        EventSheet(
+            event = ev,
+            line = state.line(ev.lineId),
+            calendarName = calendar?.name,
+            onDismiss = { openEventId = null },
+            actions = EventActions(
+                edit = { onEdit(ev) },
+                delete = {
+                    viewModel.deleteEvent(ev)
+                    showUndo("Deleted “${ev.title}”") { viewModel.restoreEvent(ev) }
+                },
+                hide = {
+                    viewModel.hideEvent(ev.id)
+                    showUndo("Removed “${ev.title}” from the board") { viewModel.unhideEvent(ev.id) }
+                },
+                hideCalendar = {
+                    calendar?.let { cal ->
+                        viewModel.setCalendarShown(cal.id, false)
+                        showUndo("Hid “${cal.name}”") { viewModel.setCalendarShown(cal.id, true) }
+                    }
+                },
+                openInCalendar = {
+                    ev.calendarEventId?.let { id ->
+                        runCatching {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id))
+                            )
+                        }
+                    }
+                },
+                turnOffSample = { viewModel.setSampleMode(false) },
+            ),
+        )
+    }
+
     if (showSettings) {
         SettingsDialog(
             state = state,
+            viewModel = viewModel,
             onDismiss = { showSettings = false },
-            onSampleMode = viewModel::setSampleMode,
             onRequestCalendar = requestCalendar,
-        )
-    }
-    pendingDelete?.let { ev ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text(ev.title) },
-            text = { Text("Remove this plan from your board?") },
-            confirmButton = {
-                TextButton(onClick = { viewModel.deleteEvent(ev.id); pendingDelete = null }) { Text("Remove") }
-            },
-            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Keep") } },
         )
     }
 }
@@ -322,83 +359,135 @@ private fun DepartureRow(event: BoardEvent, state: BoardUiState, highlighted: Bo
 }
 
 @Composable
-private fun ConnectCalendarCard(onConnect: () -> Unit, onSample: () -> Unit) {
+private fun EmptyBoard(
+    title: String,
+    showCalendarLink: Boolean,
+    showSampleLink: Boolean,
+    onAdd: () -> Unit,
+    onConnect: () -> Unit,
+    onSample: () -> Unit,
+) {
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(20.dp)
-            .border(2.dp, Board.Ink, RoundedCornerShape(6.dp))
-            .padding(20.dp)
+            .padding(horizontal = 24.dp, vertical = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Connect your calendar", color = Board.Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text(title, color = Board.Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         Spacer(Modifier.height(6.dp))
         Text(
-            "Day Board reads the events on your phone's calendar and shows them as departures. Nothing leaves your device.",
+            if (showCalendarLink) {
+                "Add your own plans, or bring in the events from your phone's calendar."
+            } else {
+                "Add a plan and it will show up here."
+            },
             color = Board.Muted,
             fontSize = 14.sp,
+            textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(20.dp))
         Text(
-            "ALLOW CALENDAR ACCESS",
+            "ADD EVENT",
             color = Board.Yellow,
             fontWeight = FontWeight.Black,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
             letterSpacing = 1.sp,
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Board.Ink, RoundedCornerShape(4.dp))
-                .clickable(onClick = onConnect)
-                .padding(vertical = 14.dp),
+                .clickable(onClick = onAdd)
+                .padding(vertical = 15.dp),
         )
-        Text(
-            "Back to the sample day",
-            color = Board.Muted,
-            fontSize = 13.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onSample)
-                .padding(top = 14.dp),
-        )
+        if (showCalendarLink) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "SHOW PHONE CALENDAR",
+                color = Board.Ink,
+                fontWeight = FontWeight.Black,
+                fontSize = 13.sp,
+                letterSpacing = 1.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.5.dp, Board.Ink, RoundedCornerShape(4.dp))
+                    .clickable(onClick = onConnect)
+                    .padding(vertical = 15.dp),
+            )
+        }
+        if (showSampleLink) {
+            Text(
+                "Try the sample day",
+                color = Board.Muted,
+                fontSize = 13.sp,
+                modifier = Modifier
+                    .clickable(onClick = onSample)
+                    .padding(top = 16.dp, bottom = 4.dp, start = 8.dp, end = 8.dp),
+            )
+        }
     }
 }
 
 @Composable
 private fun SettingsDialog(
     state: BoardUiState,
+    viewModel: BoardViewModel,
     onDismiss: () -> Unit,
-    onSampleMode: (Boolean) -> Unit,
     onRequestCalendar: () -> Unit,
 ) {
+    val switchColors = SwitchDefaults.colors(checkedTrackColor = Board.Yellow, checkedThumbColor = Board.Ink)
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Board.Panel,
         title = { Text("Settings", color = Color.White, fontWeight = FontWeight.Bold) },
         text = {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Sample day", color = Color.White, fontSize = 16.sp)
-                        Text("Show a demo board instead of your calendar.", color = Board.Dim, fontSize = 12.sp)
-                    }
-                    Switch(
-                        checked = state.sampleMode,
-                        onCheckedChange = onSampleMode,
-                        colors = SwitchDefaults.colors(checkedTrackColor = Board.Yellow, checkedThumbColor = Board.Ink),
-                    )
-                }
-                Spacer(Modifier.height(16.dp))
-                Text("Device calendar", color = Color.White, fontSize = 16.sp)
-                if (state.hasCalendarPermission) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("PHONE CALENDAR", color = Board.Dim, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Spacer(Modifier.height(6.dp))
+                if (!state.hasCalendarPermission) {
                     Text(
-                        "Connected · ${state.calendars.size} calendars. Assign them to lines on the Lines tab.",
+                        "Your board only shows the plans you add. You can also show the events from your phone's calendar.",
                         color = Board.Dim,
                         fontSize = 12.sp,
                     )
+                    TextButton(onClick = onRequestCalendar) { Text("Show phone calendar", color = Board.Yellow) }
+                } else if (state.calendars.isEmpty()) {
+                    Text("No calendars found on this phone.", color = Board.Dim, fontSize = 12.sp)
                 } else {
-                    Text("Not connected.", color = Board.Dim, fontSize = 12.sp)
-                    TextButton(onClick = onRequestCalendar) { Text("Allow calendar access", color = Board.Yellow) }
+                    Text("Choose which calendars appear on the board.", color = Board.Dim, fontSize = 12.sp)
+                    state.calendars.forEach { cal ->
+                        Row(Modifier.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(10.dp).background(Color(cal.color), CircleShape))
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(cal.name, color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (cal.account.isNotBlank() && cal.account != cal.name) {
+                                    Text(cal.account, color = Board.Dim, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                            Switch(
+                                checked = cal.shown,
+                                onCheckedChange = { viewModel.setCalendarShown(cal.id, it) },
+                                colors = switchColors,
+                            )
+                        }
+                    }
+                }
+                if (state.hiddenEventCount > 0) {
+                    TextButton(onClick = viewModel::unhideAllEvents) {
+                        Text(
+                            "Bring back ${state.hiddenEventCount} removed calendar event${if (state.hiddenEventCount == 1) "" else "s"}",
+                            color = Board.Yellow,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Sample day", color = Color.White, fontSize = 16.sp)
+                        Text("Show the demo board from the video.", color = Board.Dim, fontSize = 12.sp)
+                    }
+                    Switch(checked = state.sampleMode, onCheckedChange = viewModel::setSampleMode, colors = switchColors)
                 }
             }
         },

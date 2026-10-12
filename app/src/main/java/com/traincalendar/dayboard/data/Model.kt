@@ -28,6 +28,8 @@ data class BoardEvent(
     val source: EventSource,
     /** Calendar event id, for opening it in the calendar app. */
     val calendarEventId: Long? = null,
+    /** The phone calendar this event came from. */
+    val calendarId: Long? = null,
 ) {
     fun isLive(now: Long) = !allDay && now in start until end
     fun hasDeparted(now: Long) = !allDay && now >= end
@@ -35,7 +37,14 @@ data class BoardEvent(
         if (end <= start) 0f else ((now - start).toFloat() / (end - start)).coerceIn(0f, 1f)
 }
 
-data class CalendarInfo(val id: Long, val name: String, val account: String, val color: Int)
+data class CalendarInfo(
+    val id: Long,
+    val name: String,
+    val account: String,
+    val color: Int,
+    /** Whether this calendar's events appear on the board. */
+    val shown: Boolean = true,
+)
 
 /** What the TIME column shows: a big value and a small unit underneath. */
 data class Countdown(val value: String, val unit: String)

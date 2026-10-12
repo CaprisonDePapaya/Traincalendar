@@ -7,6 +7,7 @@ import com.traincalendar.dayboard.data.BoardEvent
 import com.traincalendar.dayboard.data.BoardRepository
 import com.traincalendar.dayboard.data.CalendarInfo
 import com.traincalendar.dayboard.data.DEFAULT_LINES
+import com.traincalendar.dayboard.data.EventSource
 import com.traincalendar.dayboard.data.Line
 import com.traincalendar.dayboard.widget.DayBoardWidget
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +27,7 @@ data class BoardUiState(
     val sampleMode: Boolean = true,
     val hasCalendarPermission: Boolean = false,
     val calendars: List<CalendarInfo> = emptyList(),
+    val hiddenEventCount: Int = 0,
     val loaded: Boolean = false,
 ) {
     val isToday get() = date == LocalDate.now()
@@ -37,6 +39,7 @@ class BoardViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = BoardRepository(app)
     private val _state = MutableStateFlow(BoardUiState())
     val state: StateFlow<BoardUiState> = _state
+    private var loadSeq = 0
 
     init {
         reload()
@@ -53,6 +56,7 @@ class BoardViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun reload() {
+        val seq = ++loadSeq
         viewModelScope.launch {
             val date = _state.value.date
             val loaded = withContext(Dispatchers.IO) {
@@ -65,11 +69,12 @@ class BoardViewModel(app: Application) : AndroidViewModel(app) {
                     sampleMode = repo.sampleMode,
                     hasCalendarPermission = repo.hasCalendarPermission(),
                     calendars = repo.calendars(),
+                    hiddenEventCount = repo.hiddenEvents.size,
                     loaded = true,
                 )
             }
-            // Ignore a stale load if the user switched days in the meantime.
-            if (_state.value.date == date) _state.value = loaded
+            // Only the newest load wins, so a slow, stale one can't undo an edit.
+            if (seq == loadSeq) _state.value = loaded
         }
     }
 
@@ -106,13 +111,57 @@ class BoardViewModel(app: Application) : AndroidViewModel(app) {
         changed()
     }
 
-    fun addEvent(title: String, location: String?, start: Long, end: Long, allDay: Boolean, lineId: String) {
-        repo.addLocalEvent(title, location, start, end, allDay, lineId)
+    /** Adds a new event ([id] null) or updates one of the user's own events. */
+    fun saveEvent(id: String?, draft: EventDraft) {
+        val (start, end) = draft.toMillis()
+        repo.saveLocalEvent(
+            BoardEvent(
+                id = id ?: repo.newLocalId(),
+                title = draft.title.trim(),
+                location = draft.location.trim().ifBlank { null },
+                start = start,
+                end = end,
+                allDay = draft.allDay,
+                lineId = draft.lineId,
+                source = EventSource.LOCAL,
+            )
+        )
+        // Follow the event to its day so it's visible right after saving.
+        if (draft.date != _state.value.date) {
+            _state.update { it.copy(date = draft.date, events = emptyList(), loaded = false) }
+        }
         changed()
     }
 
-    fun deleteEvent(id: String) {
-        repo.deleteLocalEvent(id)
+    fun deleteEvent(event: BoardEvent) {
+        repo.deleteLocalEvent(event.id)
+        changed()
+    }
+
+    /** Puts a deleted event back (the snackbar's Undo). */
+    fun restoreEvent(event: BoardEvent) {
+        repo.saveLocalEvent(event)
+        changed()
+    }
+
+    /** Takes a phone-calendar event off the board; the calendar keeps it. */
+    fun hideEvent(id: String) {
+        repo.hiddenEvents = repo.hiddenEvents + id
+        changed()
+    }
+
+    fun unhideEvent(id: String) {
+        repo.hiddenEvents = repo.hiddenEvents - id
+        changed()
+    }
+
+    fun unhideAllEvents() {
+        repo.hiddenEvents = emptySet()
+        changed()
+    }
+
+    fun setCalendarShown(calendarId: Long, shown: Boolean) {
+        repo.hiddenCalendars = if (shown) repo.hiddenCalendars - calendarId else repo.hiddenCalendars + calendarId
         changed()
     }
 }

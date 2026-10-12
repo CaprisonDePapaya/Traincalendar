@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -53,6 +54,7 @@ private val subFormat = DateTimeFormatter.ofPattern("EEE MMM d", Locale.getDefau
 fun LinesScreen(state: BoardUiState, viewModel: BoardViewModel) {
     var editing by remember { mutableStateOf<Line?>(null) }
     var isNew by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<Line?>(null) }
 
     LazyColumn(
         Modifier
@@ -82,8 +84,16 @@ fun LinesScreen(state: BoardUiState, viewModel: BoardViewModel) {
                     Spacer(Modifier.width(12.dp))
                     Text(line.name, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                     Text("$count today", color = Board.Dim, fontSize = 12.sp)
-                    Spacer(Modifier.width(12.dp))
-                    Text("›", color = Board.Dim, fontSize = 20.sp)
+                    if (state.lines.size > 1) {
+                        Box(
+                            Modifier
+                                .padding(start = 8.dp)
+                                .size(40.dp)
+                                .clickable { deleting = line }
+                                .testTag("delete-line-${line.id}"),
+                            contentAlignment = Alignment.Center,
+                        ) { TrashIcon(Board.Dim) }
+                    }
                 }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Board.PanelLine))
             }
@@ -124,6 +134,29 @@ fun LinesScreen(state: BoardUiState, viewModel: BoardViewModel) {
                 fontSize = 12.sp,
             )
         }
+    }
+
+    deleting?.let { line ->
+        val fallback = state.lines.firstOrNull { it.id != line.id }
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            containerColor = Board.Panel,
+            title = { Text("Delete the ${line.name} line?", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Events on it will ride the ${fallback?.name ?: "first"} line instead.",
+                    color = Board.Dim,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.deleteLine(line.id); deleting = null }) {
+                    Text("Delete", color = Board.Red)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleting = null }) { Text("Cancel", color = Color.White) }
+            },
+        )
     }
 
     editing?.let { line ->
@@ -262,7 +295,7 @@ private fun EditLineDialog(
         dismissButton = {
             Row {
                 if (onDelete != null) {
-                    TextButton(onClick = onDelete) { Text("Delete", color = Color(0xFFEE352E)) }
+                    TextButton(onClick = onDelete) { Text("Delete", color = Board.Red) }
                 }
                 TextButton(onClick = onDismiss) { Text("Cancel", color = Color.White) }
             }

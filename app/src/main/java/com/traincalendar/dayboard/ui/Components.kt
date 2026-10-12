@@ -37,6 +37,7 @@ object Board {
     val Ink = Color(0xFF111111)
     val Muted = Color(0xFF6E6A62)
     val Dim = Color(0xFF8A8A8A)
+    val Red = Color(0xFFEE352E)
 }
 
 @Composable
@@ -130,5 +131,25 @@ fun TabIcon(tab: Tab, color: Color) {
                 drawLine(color, Offset(s * 0.1f, s / 2), Offset(s * 0.9f, s / 2), stroke, StrokeCap.Round)
             }
         }
+    }
+}
+
+/** A small outlined trash can, drawn to match the tab icons. */
+@Composable
+fun TrashIcon(color: Color) {
+    Canvas(Modifier.size(18.dp)) {
+        val s = size.minDimension
+        val stroke = s * 0.09f
+        drawLine(color, Offset(s * 0.12f, s * 0.24f), Offset(s * 0.88f, s * 0.24f), stroke, StrokeCap.Round)
+        drawLine(color, Offset(s * 0.38f, s * 0.1f), Offset(s * 0.62f, s * 0.1f), stroke, StrokeCap.Round)
+        drawRoundRect(
+            color,
+            topLeft = Offset(s * 0.22f, s * 0.24f),
+            size = Size(s * 0.56f, s * 0.68f),
+            cornerRadius = CornerRadius(s * 0.08f),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(stroke),
+        )
+        drawLine(color, Offset(s * 0.42f, s * 0.42f), Offset(s * 0.42f, s * 0.76f), stroke, StrokeCap.Round)
+        drawLine(color, Offset(s * 0.58f, s * 0.42f), Offset(s * 0.58f, s * 0.76f), stroke, StrokeCap.Round)
     }
 }
