@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A tiny departure board: a yellow "live" row above two white rows. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#FFFCCC0A" android:pathData="M30,36h48v12h-48z" />
+    <path android:fillColor="#FF0B0B0B" android:pathData="M36,42m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+    <path android:fillColor="#FF0B0B0B" android:pathData="M44,40.5h22v3h-22z" />
+    <path android:fillColor="#FF0039A6" android:pathData="M36,58m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M44,56.5h18v3h-18z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M70,55h8v6h-8z" />
+    <path android:fillColor="#FFB933AD" android:pathData="M36,72m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M44,70.5h14v3h-14z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M70,69h8v6h-8z" />
+</vector>
