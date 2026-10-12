@@ -36,6 +36,10 @@ Every push builds a debug APK on GitHub Actions. Open the latest run of
 install `app-debug.apk` on your phone. You'll need to allow installs from
 unknown sources.
 
+Builds are signed with the repo's `debug.keystore`, so a new APK installs over
+the previous one and keeps your events. Builds made before version 1.1 used a
+random key, so uninstall those once before installing a newer build.
+
 ## Build locally
 
 You need Android Studio, or JDK 17 plus the Android SDK (API 35).
