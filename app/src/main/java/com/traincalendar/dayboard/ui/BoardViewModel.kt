@@ -26,6 +26,7 @@ data class BoardUiState(
     val sampleMode: Boolean = true,
     val hasCalendarPermission: Boolean = false,
     val calendars: List<CalendarInfo> = emptyList(),
+    val loaded: Boolean = false,
 ) {
     val isToday get() = date == LocalDate.now()
     fun line(id: String): Line =
@@ -64,6 +65,7 @@ class BoardViewModel(app: Application) : AndroidViewModel(app) {
                     sampleMode = repo.sampleMode,
                     hasCalendarPermission = repo.hasCalendarPermission(),
                     calendars = repo.calendars(),
+                    loaded = true,
                 )
             }
             // Ignore a stale load if the user switched days in the meantime.
@@ -73,11 +75,11 @@ class BoardViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun changed() {
         reload()
-        viewModelScope.launch { DayBoardWidget.refresh(getApplication()) }
+        viewModelScope.launch { DayBoardWidget.refresh(getApplication<Application>()) }
     }
 
     fun selectDate(date: LocalDate) {
-        _state.update { it.copy(date = date, events = emptyList()) }
+        _state.update { it.copy(date = date, events = emptyList(), loaded = false) }
         reload()
     }
 

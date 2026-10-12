@@ -91,7 +91,7 @@ fun BoardScreen(state: BoardUiState, viewModel: BoardViewModel) {
 
     Column(Modifier.fillMaxSize()) {
         // ---- Header ------------------------------------------------------
-        Column(Modifier.background(Board.Black).padding(start = 16.dp, end = 16.dp, top = 14.dp)) {
+        Column(Modifier.fillMaxWidth().background(Board.Black).padding(start = 16.dp, end = 16.dp, top = 14.dp)) {
             Row(verticalAlignment = Alignment.Top) {
                 Column(
                     Modifier
@@ -189,10 +189,10 @@ fun BoardScreen(state: BoardUiState, viewModel: BoardViewModel) {
                     }
                 }
             }
-            if (!state.sampleMode && !state.hasCalendarPermission) {
+            if (state.loaded && !state.sampleMode && !state.hasCalendarPermission) {
                 item { ConnectCalendarCard(requestCalendar, onSample = { viewModel.setSampleMode(true) }) }
             }
-            if (timed.isEmpty() && (state.sampleMode || state.hasCalendarPermission)) {
+            if (state.loaded && timed.isEmpty() && (state.sampleMode || state.hasCalendarPermission)) {
                 item {
                     Text(
                         if (state.isToday) "No more departures today." else "No departures scheduled.",
